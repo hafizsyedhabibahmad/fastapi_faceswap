@@ -1,6 +1,8 @@
 fastapi
 uvicorn
-gradio_client
-Pillow
-retry
+gradio-client
+pillow
 cachetools
+jinja2
+python-multipart
+retry
