@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+gradio_client
+Pillow
+retry
+cachetools
