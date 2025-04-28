@@ -1,4 +1,3 @@
-```python
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -168,4 +167,3 @@ async def swap_faces(source_image: UploadFile = File(...), dest_image: UploadFil
         cache[cache_key] = result
         logger.info(f"Cache updated with: {result}")
         return {"result_image_url": f"/output/{os.path.basename(result)}"}
-```
