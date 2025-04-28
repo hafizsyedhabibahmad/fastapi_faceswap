@@ -1,3 +1,8 @@
+import os
+import uuid
+import hashlib
+import tempfile
+import logging
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -5,12 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from gradio_client import Client, handle_file
 from retry import retry
 from PIL import Image, ImageEnhance
-import os
-import uuid
-import hashlib
-import tempfile
-import logging
 from cachetools import TTLCache
+import uvicorn
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -28,16 +29,15 @@ app.add_middleware(
 )
 
 # Mount the output directory to serve static files
-app.mount("/output", StaticFiles(directory="output"), name="output")
+OUTPUT_FOLDER = "output"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+app.mount("/output", StaticFiles(directory=OUTPUT_FOLDER), name="output")
 
 # Configuration
-OUTPUT_FOLDER = "output"
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 # Cache setup (TTL: 1 hour)
 cache = TTLCache(maxsize=100, ttl=3600)
-
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -48,20 +48,28 @@ def validate_file(file_path: str) -> bool:
 def get_file_hash(file_content: bytes) -> str:
     return hashlib.sha256(file_content).hexdigest()
 
-def compress_image(content: bytes, max_size: int = 512) -> bytes:  # Reduced max_size to 512 to save memory
+def compress_image(content: bytes, max_size: int = 256) -> bytes:  # Reduced max_size to 256 to save memory
+    temp_in = None
+    temp_out = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_in:
-            temp_in.write(content)
-            temp_in.flush()
-            img = Image.open(temp_in.name)
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_out:
-                img.save(temp_out.name, "PNG", optimize=True, quality=85)
-                with open(temp_out.name, "rb") as f:
-                    return f.read()
+        temp_in = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        temp_in.write(content)
+        temp_in.flush()
+        img = Image.open(temp_in.name)
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        temp_out = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img.save(temp_out.name, "PNG", optimize=True, quality=85)
+        with open(temp_out.name, "rb") as f:
+            return f.read()
     except Exception as e:
         logger.error(f"Error compressing image: {str(e)}")
         return content
+    finally:
+        # Clean up temporary files
+        if temp_in and os.path.exists(temp_in.name):
+            os.unlink(temp_in.name)
+        if temp_out and os.path.exists(temp_out.name):
+            os.unlink(temp_out.name)
 
 def enhance_image(image_path: str) -> None:
     try:
@@ -167,3 +175,8 @@ async def swap_faces(source_image: UploadFile = File(...), dest_image: UploadFil
         cache[cache_key] = result
         logger.info(f"Cache updated with: {result}")
         return {"result_image_url": f"/output/{os.path.basename(result)}"}
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", default=8000))  # Use PORT from env, default to 8000 for local dev
+    logger.info(f"Starting Uvicorn on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
